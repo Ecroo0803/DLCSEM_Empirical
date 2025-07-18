@@ -1,0 +1,218 @@
+model{
+
+# model has ARMA(1,0) structure on the latent level with two states S and one-vs. three factors
+
+# P(S_t=s|S_(t-1)=2), i.e. backswitch probability
+PSb[1] <- 0.01
+PSb[2] <- 0.99
+
+
+for(i in 1:N){#patients
+
+########################################## level 2 ##########################################
+# multivariate normal distribution random effects patients in S=1 and S=2
+  
+  u0.S1[i,1:4] ~ dmnorm(mu0[1:4],psizeta2.S1[1:4,1:4])
+  u0.S2[i] ~ dnorm(0,psizeta2.S2)
+   
+########################################### level 1 ##########################################
+
+  ##################
+  # Markov Switching Model
+  ##################
+  
+  for(t in 2:Nt[i]){
+    # logistic model for P(S_t=s|S_(t-1)=1)
+    logit(eta2[i,t]) <- b3[1] + 
+                        b3[2]*eta1.S1[i,t-1,1]+
+                        b3[3]*eta1.S1[i,t-1,2]
+                           
+    # transition matrix
+    PSa[i,t,1] <- eta2[i,t]
+    PSa[i,t,2] <- 1-PSa[i,t,1]
+    
+    PS1[i,t,1:2] <- ifelse(S[i,t-1]==1,PSa[i,t,1:2],PSb[1:2])
+    
+    # state membership
+    S[i,t] ~ dcat(PS1[i,t,1:2]) 
+  }
+  
+  # constraint for t=1 (all in S_1=1)
+  S[i,1] <- 1
+  
+  ####################################
+  # latent factor model ("DSEM" part within each state): ARMA(1,0)
+  # In S=1: eta1.S1[,,1:3] 
+  # In S=2: eta1.S2[,,1]   
+  ####################################
+  
+  for(t in 1:Nt[i]){
+    eta1.S1[i,t,1:2] ~ dmnorm(mueta1.S1[i,t,1:2],psizeta1.S1[1:2,1:2])
+    eta1.S2[i,t] ~ dnorm(mueta1.S2[i,t],psizeta1.S2)
+  }
+  
+  ##################
+  # means groups S==1,S==2
+  # mean is random effect with patient (u) 
+  # random terms are state-specific 
+  ##################
+  
+  ##################
+  # S==1
+  ##################
+  # t==1
+  for(j in 1:2){
+    mueta1.S1[i,1,j] <-  u0.S1[i,j]
+  }
+    
+  # t==2...T
+  for(t in 2:Nt[i]){
+   #  mueta1.S1[i,t,1] <-  u0.S1[i,1] + (u0.S1[i,3]+phi.S1[1])*(eta1.S1[i,t-1,1]- u0.S1[i,1])+ b1.S1[1]*(eta1.S1[i,t-1,2]-u0.S1[i,1]) 
+   #  mueta1.S1[i,t,2] <-  u0.S1[i,2] + (u0.S1[i,4]+phi.S1[2])*(eta1.S1[i,t-1,2]-u0.S1[i,2]) + b1.S1[2]*(eta1.S1[i,t-1,1]-u0.S1[i,2]) 
+    mueta1.S1[i,t,1] <-  u0.S1[i,1] + (u0.S1[i,3]+phi.S1[1])*eta1.S1[i,t-1,1]+ b1.S1[1]*eta1.S1[i,t-1,2] 
+    mueta1.S1[i,t,2] <-  u0.S1[i,2] + (u0.S1[i,4]+phi.S1[2])*eta1.S1[i,t-1,2] + b1.S1[2]*eta1.S1[i,t-1,1]
+   }
+  
+  ##################
+  # S==2
+  ##################
+  # t==1
+  mueta1.S2[i,1] <- u0.S2[i] 
+  
+    
+  # t==2...T
+  for(t in 2:Nt[i]){
+   # mueta1.S2[i,t] <- u0.S2[i] + phi.S2*(eta1.S2[i,t-1]-u0.S2[i])
+    mueta1.S2[i,t] <- phi.S2 * eta1.S2[i,t-1] 
+ }
+  
+  
+  ##################
+  # measurement model: no additional time-structures
+  ##################
+  # distribution is state-specific (mean structure given the factor distribution/loading pattern, and residual variances/precisions)
+  for(t in 1:Nt[i]){
+    for(j in 1:6){y1[i,t,j] ~ dnorm(muy1[i,t,j,S[i,t]],psiy1[j,S[i,t]])}
+  
+    
+    
+    ########################################
+    # S==1
+    ########################################
+    # scaling indicator for each factor
+    muy1[i,t,1,1]  <- eta1.S1[i,t,1]
+    muy1[i,t,4,1]  <- eta1.S1[i,t,2]
+      
+    # rest 
+    for(j in 2:3){muy1[i,t,j,1] <- ly1.S1[j-1]*eta1.S1[i,t,1]}
+    for(j in 5:6){muy1[i,t,j,1] <- ly1.S1[j-2]*eta1.S1[i,t,2]}
+    
+    ########################################
+    # S==2
+    ########################################
+    # scaling indicator for each factor
+    muy1[i,t,1,2]  <- eta1.S2[i,t]
+    
+    # rest 
+    for(j in 2:6){muy1[i,t,j,2] <- ly1.S2[j-1]*eta1.S2[i,t]}
+
+  }
+  
+}# end N loop
+
+########################################## Priors ##########################################
+
+# zero mean for random effects
+#for(j in 1:3){mu1[j] <- 0}
+
+########################################
+# S==1
+########################################
+for(j in 1:2){
+  # AR coefficient
+  phi.S1[j] ~ dunif(-1,1)
+  # cross lagged effects
+  b1.S1[j]  ~ dnorm(0,1)
+}
+
+
+
+########################################
+# S==2
+########################################
+# mean in S=2
+# AR coefficient
+phi.S2 ~dunif(-1,1)
+
+
+  
+########################################
+# measurement model
+# note: due to rescaling all items have zero means at time 1 and hence zero intercepts
+########################################
+# factor loadings in S=1 and S=2
+for(j in 1:4){ly1.S1[j] ~ dnorm(1,1)I(0,)} ##I(0,) must above zero
+for(j in 1:5){ly1.S2[j] ~ dnorm(1,1)I(0,)} 
+
+
+########################################
+# precisions measurement model
+########################################
+for(j in 1:6){for(k in 1:2){psiy1[j,k] ~ dgamma(1,1)}}
+
+########################################
+# L1&L2 state specific precisions (wishart)
+########################################
+psizeta1.S1[1:2,1:2] ~ dwish(PHinv[1:2,1:2],2)
+psizeta2.S1[1:4,1:4] ~ dwish(PHinv[1:4,1:4],4)
+
+psizeta1.S2 ~ dgamma(1,1)
+psizeta2.S2 ~ dgamma(1,1)
+#psizeta2.S2[1:2,1:2] ~ dwish(PHinv[1:2,1:2],2)
+
+########################################
+# Markov switching model
+########################################
+b3[1] ~ dnorm(0,0.001) 
+for(j in 2:3){b3[j]  ~ dnorm(0,1)}
+
+
+########################################## transformations ##########################################
+
+##############################################
+# (co)variances
+##############################################
+for(k in 1:2){for(j in 1:6){sigmay1[j,k] <- 1/psiy1[j,k]}}
+
+sigmazeta1.S1[1:2,1:2] <- inverse(psizeta1.S1[1:2,1:2])
+sigmazeta2.S1[1:4,1:4] <- inverse(psizeta2.S1[1:4,1:4])
+
+sigmazeta1.S2 <- 1/psizeta1.S2
+sigmazeta2.S2 <- 1/psizeta2.S2
+#sigmazeta2.S2 <- inverse(psizeta2.S2[1:2,1:2])
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
